@@ -120,18 +120,18 @@ export const RecepcaoView: React.FC<RecepcaoViewProps> = ({
     }
   };
 
-  const handleDownloadQr = () => {
+  const handleDownloadQr = async () => {
     if (!lastCreated) return;
-    const url = getQrDataUrl(lastCreated.token, 400);
+    const url = await getQrDataUrl(lastCreated.token, 400);
     const link = document.createElement('a');
     link.href = url;
     link.download = `QR_HVA_Ficha_${lastCreated.ficha}_${lastCreated.data}.png`;
     link.click();
   };
 
-  const handlePrintQr = () => {
+  const handlePrintQr = async () => {
     if (!lastCreated) return;
-    const url = getQrDataUrl(lastCreated.token, 400);
+    const url = await getQrDataUrl(lastCreated.token, 400);
     const win = window.open('', '_blank');
     if (win) {
       win.document.write(`

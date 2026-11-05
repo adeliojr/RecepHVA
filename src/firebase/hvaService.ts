@@ -217,18 +217,28 @@ export async function agendarAtendimento(params: {
 }
 
 export async function checkinComQr(
-  token: string,
+  rawToken: string,
   daySummary: DaySummary,
   appts: Appointment[],
   ignorarData = false
 ): Promise<{ appt: Appointment; jaFeito: boolean; frente: number }> {
-  const a = appts.find((x) => x.token === token);
+  const token = (rawToken || '')
+    .trim()
+    .replace(/^.*[#?&]token=/, '')
+    .split(/[#?&\s]/)[0];
+
+  const a = appts.find(
+    (x) =>
+      x.token === token ||
+      x.token.toLowerCase() === token.toLowerCase() ||
+      x.id === token
+  );
   if (!a) {
     const match = /^(\d{4})(\d{2})(\d{2})/.exec(token || '');
     if (match && `${match[1]}-${match[2]}-${match[3]}` !== hoje() && !ignorarData) {
       throw new Error(`Este QR code é para o dia ${match[3]}/${match[2]}. Procure a recepção.`);
     }
-    throw new Error('QR code não reconhecido. Procure a recepção.');
+    throw new Error(`QR code (${token.slice(0, 12)}...) não reconhecido. Procure a recepção.`);
   }
 
   if (a.status === 'cancelado') {
