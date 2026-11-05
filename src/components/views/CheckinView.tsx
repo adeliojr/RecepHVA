@@ -22,6 +22,7 @@ import {
   Flame,
   HeartPulse,
   Keyboard,
+  Printer,
   QrCode,
   RefreshCw,
   RotateCcw,
@@ -43,11 +44,20 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
   appointments,
 }) => {
   const [modo, setModo] = useState<
-    'scan' | 'balcao' | 'retorno' | 'emergencia' | 'sucesso' | 'manual_token'
+    'scan' | 'retorno' | 'emergencia' | 'sucesso' | 'manual_token'
   >('scan');
   const [cameraAtiva, setCameraAtiva] = useState(false);
   const [cameraErro, setCameraErro] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+
+  // Automatic printer persistence in localStorage
+  const [autoPrint, setAutoPrint] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('hva_auto_print') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   // Success result
   const [resultado, setResultado] = useState<{
@@ -56,19 +66,22 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
     frente: number;
     msg: string;
     jaFeito?: boolean;
+    ficha?: string;
+    tutor?: string;
+    pet?: string;
+    clinico?: string;
+    horario?: string;
   } | null>(null);
-  const [countdown, setCountdown] = useState<number>(10);
+  const [countdown, setCountdown] = useState<number>(4);
 
-  // Balcao form
-  const [fichaBalcao, setFichaBalcao] = useState('');
   const [loading, setLoading] = useState(false);
   const [erroMsg, setErroMsg] = useState<string | null>(null);
 
-  // Manual token modal
+  // Manual token input
   const [manualTokenInput, setManualTokenInput] = useState('');
 
   // Retorno keypad
-  const [letraRetorno, setLetraRetorno] = useState<'C' | 'R' | 'L' | 'X' | 'U'>('C');
+  const [letraRetorno, setLetraRetorno] = useState<'C' | 'R' | 'L' | 'X' | 'U' | 'O'>('C');
   const [numeroRetorno, setNumeroRetorno] = useState('');
 
   // Camera video ref
@@ -77,16 +90,116 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
   const cancelScanRef = useRef<(() => void) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Toggle and persist automatic printing
+  const toggleAutoPrint = () => {
+    const nextVal = !autoPrint;
+    setAutoPrint(nextVal);
+    try {
+      localStorage.setItem('hva_auto_print', String(nextVal));
+    } catch {}
+  };
+
+  // Thermal printing helper for kiosk tickets
+  const imprimirSenhaTermica = (data: {
+    senha: string;
+    tipo: string;
+    frente: number;
+    ficha?: string;
+    tutor?: string;
+    pet?: string;
+    clinico?: string;
+    horario?: string;
+  }) => {
+    try {
+      const horaStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const dataStr = new Date().toLocaleDateString('pt-BR');
+
+      // Create a hidden print iframe to avoid leaving the kiosk view
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow?.document;
+      if (!doc) return;
+
+      doc.write(`
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Senha ${data.senha}</title>
+            <style>
+              @page { size: 80mm auto; margin: 0; }
+              body {
+                font-family: 'Courier New', Courier, monospace, sans-serif;
+                width: 72mm;
+                margin: 0 auto;
+                padding: 10px 4px;
+                color: #000;
+                text-align: center;
+              }
+              .logo { font-size: 14px; font-weight: 900; margin-bottom: 2px; }
+              .sub { font-size: 10px; margin-bottom: 6px; }
+              .divider { border-top: 1.5px dashed #000; margin: 6px 0; }
+              .tipo { font-size: 13px; font-weight: 800; text-transform: uppercase; }
+              .senha { font-size: 48px; font-weight: 900; letter-spacing: 2px; margin: 4px 0; }
+              .info { font-size: 11px; text-align: left; margin: 4px 0; line-height: 1.4; }
+              .frente { font-size: 11px; font-weight: 800; margin-top: 4px; }
+              .footer { font-size: 10px; margin-top: 8px; }
+            </style>
+          </head>
+          <body>
+            <div class="logo">HOSPITAL VETERINÁRIO ARAÚJO</div>
+            <div class="sub">HVA - Recepção & Triagem</div>
+            <div class="divider"></div>
+            <div class="tipo">${data.tipo}</div>
+            <div class="senha">${data.senha}</div>
+            <div class="divider"></div>
+            <div class="info">
+              <div><b>Data:</b> ${dataStr}  <b>Hora:</b> ${horaStr}</div>
+              ${data.ficha ? `<div><b>Ficha:</b> ${data.ficha}</div>` : ''}
+              ${data.tutor ? `<div><b>Tutor:</b> ${data.tutor}</div>` : ''}
+              ${data.pet ? `<div><b>Paciente:</b> ${data.pet}</div>` : ''}
+              ${data.clinico ? `<div><b>Clínico:</b> ${data.clinico}</div>` : ''}
+              ${data.horario ? `<div><b>Horário agendado:</b> ${data.horario}</div>` : ''}
+            </div>
+            <div class="divider"></div>
+            <div class="frente">
+              ${data.frente > 0 ? `Pessoas na frente: ${data.frente}` : 'Sua vez está próxima!'}
+            </div>
+            <div class="footer">Acompanhe a chamada pelo Painel TV</div>
+          </body>
+        </html>
+      `);
+      doc.close();
+
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+        }, 1500);
+      }, 250);
+    } catch (err) {
+      console.warn('Silent print error:', err);
+    }
+  };
+
   // Auto-reset timer when in 'sucesso'
   useEffect(() => {
     if (modo !== 'sucesso') return;
-    setCountdown(10);
+    setCountdown(4);
     const interval = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
           handleVoltar();
-          return 10;
+          return 4;
         }
         return prev - 1;
       });
@@ -110,7 +223,6 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
       try {
         let stream: MediaStream;
         try {
-          // Attempt 1: with preferred facingMode and HD resolution
           stream = await navigator.mediaDevices.getUserMedia({
             video: {
               facingMode: { ideal: facingMode },
@@ -120,7 +232,6 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
             audio: false,
           });
         } catch {
-          // Attempt 2: generic video constraints if ideal fails
           stream = await navigator.mediaDevices.getUserMedia({
             video: true,
             audio: false,
@@ -165,7 +276,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
         console.warn('Camera access issue:', err);
         if (isMounted) {
           setCameraErro(
-            'Não foi possível ligar a câmera do dispositivo. Verifique a permissão de câmera do navegador ou utilize os botões abaixo.'
+            'Não foi possível ligar a câmera do dispositivo. Verifique a permissão de câmera do navegador ou utilize as opções abaixo.'
           );
         }
       }
@@ -205,30 +316,72 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
       setErroMsg(null);
       const res = await checkinComQr(rawToken, daySummary, appointments);
       tocarSineta();
-      setResultado({
+
+      const ticketPayload = {
         senha: res.appt.senha || '—',
-        tipo: TIPOS[res.appt.tipo].label,
+        tipo: TIPOS[res.appt.tipo]?.label || 'Consulta',
         frente: res.frente,
         msg: res.jaFeito
-          ? 'Check-in já havia sido registrado anteriormente!'
+          ? 'Check-in já registrado! Esta é a sua senha.'
           : 'Check-in realizado com sucesso!',
         jaFeito: res.jaFeito,
-      });
+        ficha: res.appt.ficha,
+        tutor: res.appt.tutor,
+        pet: res.appt.pet,
+        clinico: res.appt.clinico,
+        horario: res.appt.horario,
+      };
+
+      setResultado(ticketPayload);
       setModo('sucesso');
+
+      // Trigger automatic printing if enabled
+      if (autoPrint) {
+        imprimirSenhaTermica(ticketPayload);
+      }
     } catch (err: any) {
-      setErroMsg(err.message || 'QR Code inválido.');
+      setErroMsg(err.message || 'QR Code não reconhecido.');
       tocarEmergencia();
-      // Restart camera after brief pause to allow tutor to try again
       setTimeout(() => {
         setErroMsg(null);
         setModo('scan');
-      }, 4500);
+      }, 4000);
     } finally {
       setLoading(false);
     }
   };
 
-  // Image file QR scanner fallback
+  // Immediate Walk-in Consultation (Consulta sem Agendamento)
+  // USER REQUIREMENT: Tutor does NOT need to enter record number. Issues ticket immediately!
+  const handleConsultaSemAgendamentoDireta = async () => {
+    try {
+      setLoading(true);
+      setErroMsg(null);
+      const res = await checkinManualBalcao('', 'consulta', daySummary, appointments);
+      tocarSineta();
+
+      const ticketPayload = {
+        senha: res.appt.senha || '—',
+        tipo: 'Consulta sem Agendamento',
+        frente: res.frente,
+        msg: 'Senha emitida! Aguarde ser chamado no guichê para fazer o cadastro da ficha.',
+        ficha: 'Aguardando cadastro no guichê',
+      };
+
+      setResultado(ticketPayload);
+      setModo('sucesso');
+
+      // Automatic print if enabled
+      if (autoPrint) {
+        imprimirSenhaTermica(ticketPayload);
+      }
+    } catch (err: any) {
+      setErroMsg(err.message || 'Erro ao gerar senha');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleScanFromImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -255,29 +408,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
-    // Reset file input
     e.target.value = '';
-  };
-
-  const handleBalcaoConfirm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setLoading(true);
-      setErroMsg(null);
-      const res = await checkinManualBalcao(fichaBalcao, 'consulta', daySummary, appointments);
-      tocarSineta();
-      setResultado({
-        senha: res.appt.senha || '—',
-        tipo: 'Consulta Balcão',
-        frente: res.frente,
-        msg: 'Senha emitida para atendimento no guichê!',
-      });
-      setModo('sucesso');
-    } catch (err: any) {
-      setErroMsg(err.message || 'Erro ao gerar senha');
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleEmergenciaConfirm = async () => {
@@ -286,13 +417,21 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
       setErroMsg(null);
       const res = await checkinManualBalcao('', 'emergencia', daySummary, appointments);
       tocarEmergencia();
-      setResultado({
+
+      const ticketPayload = {
         senha: res.appt.senha || '—',
         tipo: 'Emergência Veterinária',
         frente: 0,
         msg: 'EMERGÊNCIA REGISTRADA COM PRIORIDADE MÁXIMA!',
-      });
+        ficha: 'EMERGÊNCIA',
+      };
+
+      setResultado(ticketPayload);
       setModo('sucesso');
+
+      if (autoPrint) {
+        imprimirSenhaTermica(ticketPayload);
+      }
     } catch (err: any) {
       setErroMsg(err.message || 'Erro ao gerar senha de emergência');
     } finally {
@@ -315,14 +454,24 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
         appointments
       );
       tocarSineta();
-      setResultado({
+
+      const ticketPayload = {
         senha: res.appt.senha || '—',
         tipo: 'Agendamento de Retorno',
         frente: res.frente,
-        msg: 'Aguarde ser chamado no guichê para marcar a data do retorno.',
+        msg: 'Aguarde ser chamado no guichê para agendar a data do retorno.',
         jaFeito: res.jaFeito,
-      });
+        ficha: res.appt.ficha,
+        tutor: res.appt.tutor,
+        pet: res.appt.pet,
+      };
+
+      setResultado(ticketPayload);
       setModo('sucesso');
+
+      if (autoPrint) {
+        imprimirSenhaTermica(ticketPayload);
+      }
     } catch (err: any) {
       setErroMsg(err.message || 'Senha não localizada');
     } finally {
@@ -339,7 +488,6 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
   const handleVoltar = () => {
     setModo('scan');
     setErroMsg(null);
-    setFichaBalcao('');
     setNumeroRetorno('');
     setManualTokenInput('');
     setResultado(null);
@@ -361,22 +509,42 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
         className="hidden"
       />
 
-      {/* Top Banner */}
-      <div className="max-w-3xl mx-auto w-full text-center pt-2">
-        <div className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-black tracking-wider uppercase mb-2 border border-white/20">
-          <Sparkles className="w-4 h-4 text-amber-300" />
-          <span>{settings.nomeHospital}</span>
+      {/* Top Banner & Automatic Print Toggle */}
+      <div className="max-w-xl mx-auto w-full pt-1">
+        <div className="flex items-center justify-between mb-2">
+          <div className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md px-3.5 py-1 rounded-full text-xs font-black tracking-wider uppercase border border-white/20">
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span>{settings.nomeHospital}</span>
+          </div>
+
+          {/* Persistent Auto-Print Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleAutoPrint}
+            title="Ativar/Desativar impressão automática das senhas geradas"
+            className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
+              autoPrint
+                ? 'bg-amber-400 text-amber-950 border-2 border-white ring-2 ring-amber-300/40'
+                : 'bg-white/15 text-white/80 border border-white/20 hover:bg-white/25'
+            }`}
+          >
+            <Printer className={`w-3.5 h-3.5 ${autoPrint ? 'animate-bounce' : ''}`} />
+            <span>{autoPrint ? '🖨️ Impressão Auto: ATIVADA' : '🖨️ Impressão Auto: Desativada'}</span>
+          </button>
         </div>
-        <h1 className="text-3xl sm:text-5xl font-black tracking-tight drop-shadow-md">
-          Totem de Autoatendimento
-        </h1>
-        <p className="text-emerald-100 text-sm sm:text-lg mt-1 font-semibold max-w-xl mx-auto">
-          Aproxime o QR Code do seu celular da câmera ou escolha uma das opções abaixo
-        </p>
+
+        <div className="text-center">
+          <h1 className="text-3xl sm:text-5xl font-black tracking-tight drop-shadow-md">
+            Totem de Autoatendimento
+          </h1>
+          <p className="text-emerald-100 text-sm sm:text-base mt-1 font-semibold">
+            Aproxime o QR Code do seu celular da câmera ou escolha uma das opções abaixo
+          </p>
+        </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="max-w-xl mx-auto w-full my-auto py-4">
+      <div className="max-w-xl mx-auto w-full my-auto py-3">
         {erroMsg && (
           <div className="mb-4 bg-red-600 text-white p-4 rounded-2xl shadow-2xl flex items-center gap-3 font-black text-sm sm:text-base border-2 border-white animate-in zoom-in-95 duration-200">
             <AlertOctagon className="w-6 h-6 shrink-0 text-white animate-bounce" />
@@ -386,9 +554,9 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
 
         {/* ==================== 1. SCAN MODE (Default Kiosk Screen) ==================== */}
         {modo === 'scan' && (
-          <div className="flex flex-col items-center gap-6">
+          <div className="flex flex-col items-center gap-5">
             {/* Live Camera Viewport Box */}
-            <div className="relative w-64 h-64 sm:w-80 sm:h-80 bg-slate-950 rounded-3xl border-4 border-white/90 shadow-[0_12px_40px_rgba(0,0,0,0.4)] overflow-hidden flex items-center justify-center group">
+            <div className="relative w-64 h-64 sm:w-72 sm:h-72 bg-slate-950 rounded-3xl border-4 border-white/90 shadow-[0_12px_40px_rgba(0,0,0,0.4)] overflow-hidden flex items-center justify-center group">
               <video
                 ref={videoRef}
                 autoPlay
@@ -430,13 +598,13 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
               )}
             </div>
 
-            {/* Camera Utility Quick Controls */}
+            {/* Camera Utility Controls */}
             <div className="flex flex-wrap items-center justify-center gap-2">
               <button
                 type="button"
                 onClick={handleToggleCamera}
-                title="Trocar entre câmera frontal e traseira"
-                className="px-3.5 py-2 bg-white/15 hover:bg-white/25 active:scale-95 text-white rounded-xl text-xs font-bold backdrop-blur-md border border-white/20 flex items-center gap-1.5 transition-all shadow-xs"
+                title="Alternar entre câmera frontal e traseira"
+                className="px-3 py-1.5 bg-white/15 hover:bg-white/25 active:scale-95 text-white rounded-xl text-xs font-bold backdrop-blur-md border border-white/20 flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
               >
                 <SwitchCamera className="w-4 h-4" />
                 <span>Trocar Câmera</span>
@@ -446,17 +614,17 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 title="Ler imagem de QR Code"
-                className="px-3.5 py-2 bg-white/15 hover:bg-white/25 active:scale-95 text-white rounded-xl text-xs font-bold backdrop-blur-md border border-white/20 flex items-center gap-1.5 transition-all shadow-xs"
+                className="px-3 py-1.5 bg-white/15 hover:bg-white/25 active:scale-95 text-white rounded-xl text-xs font-bold backdrop-blur-md border border-white/20 flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
               >
                 <FileImage className="w-4 h-4" />
-                <span>Ler de Foto / Arquivo</span>
+                <span>Ler de Imagem</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setModo('manual_token')}
                 title="Digitar código manualmente"
-                className="px-3.5 py-2 bg-white/15 hover:bg-white/25 active:scale-95 text-white rounded-xl text-xs font-bold backdrop-blur-md border border-white/20 flex items-center gap-1.5 transition-all shadow-xs"
+                className="px-3 py-1.5 bg-white/15 hover:bg-white/25 active:scale-95 text-white rounded-xl text-xs font-bold backdrop-blur-md border border-white/20 flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
               >
                 <Keyboard className="w-4 h-4" />
                 <span>Digitar Código</span>
@@ -465,20 +633,20 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
 
             {/* Quick Test Token simulation chips */}
             {agendadosHojeSemCheckin.length > 0 && (
-              <div className="bg-emerald-900/60 backdrop-blur-md border border-emerald-400/30 rounded-2xl p-3 w-full text-center shadow-md">
-                <div className="text-[11px] uppercase tracking-wider font-extrabold text-emerald-200 mb-1.5 flex items-center justify-center gap-1.5">
+              <div className="bg-emerald-900/60 backdrop-blur-md border border-emerald-400/30 rounded-2xl p-2.5 w-full text-center shadow-md">
+                <div className="text-[11px] uppercase tracking-wider font-extrabold text-emerald-200 mb-1 flex items-center justify-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Testar leitura de QR Code agendado para hoje (Simulação):</span>
+                  <span>Testar QR Code agendado (Simulação):</span>
                 </div>
-                <div className="flex flex-wrap gap-2 justify-center">
+                <div className="flex flex-wrap gap-1.5 justify-center">
                   {agendadosHojeSemCheckin.slice(0, 4).map((a) => (
                     <button
                       key={a.id}
                       type="button"
                       onClick={() => handleProcessarToken(a.token)}
-                      className="px-3 py-1.5 bg-white text-emerald-950 hover:bg-emerald-100 rounded-xl text-xs font-black shadow-xs transition-all active:scale-95"
+                      className="px-2.5 py-1 bg-white text-emerald-950 hover:bg-emerald-100 rounded-xl text-xs font-black shadow-xs transition-all active:scale-95 cursor-pointer"
                     >
-                      Ficha {a.ficha} ({a.pet || TIPOS[a.tipo].label})
+                      Ficha {a.ficha} ({a.pet || TIPOS[a.tipo]?.label || 'Consulta'})
                     </button>
                   ))}
                 </div>
@@ -486,25 +654,26 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
             )}
 
             {/* =========================================================================
-                REQUESTED CHANGE: LARGER BUTTONS STACKED VERTICALLY ONE ABOVE ANOTHER
+                REQUESTED LAYOUT: TALL BUTTONS STACKED VERTICALLY ONE ABOVE ANOTHER
                ========================================================================= */}
-            <div className="flex flex-col gap-4 w-full pt-1">
-              {/* BUTTON 1: CONSULTA SEM AGENDAMENTO (BALCÃO) */}
+            <div className="flex flex-col gap-3.5 w-full pt-1">
+              {/* BUTTON 1: CONSULTA SEM AGENDAMENTO (EMISSÃO DIRETA SEM PEDIR FICHA) */}
               <button
                 type="button"
-                onClick={() => setModo('balcao')}
-                className="w-full py-5 sm:py-6 px-6 bg-white hover:bg-emerald-50 active:scale-[0.98] text-emerald-950 rounded-3xl shadow-xl border-3 border-white/80 transition-all flex items-center justify-between text-left group cursor-pointer"
+                disabled={loading}
+                onClick={handleConsultaSemAgendamentoDireta}
+                className="w-full py-5 px-6 bg-white hover:bg-emerald-50 active:scale-[0.98] text-emerald-950 rounded-3xl shadow-xl border-3 border-white/90 transition-all flex items-center justify-between text-left group cursor-pointer"
               >
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">
-                    <UserCheck className="w-8 h-8" />
+                  <div className="w-13 h-13 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">
+                    <UserCheck className="w-7 h-7" />
                   </div>
                   <div>
                     <h2 className="text-xl sm:text-2xl font-black text-emerald-950 tracking-tight leading-tight">
                       Consulta sem Agendamento
                     </h2>
                     <p className="text-xs sm:text-sm text-slate-500 font-semibold mt-0.5">
-                      Cheguei direto no hospital ou sem horário marcado
+                      Toque aqui para retirar sua senha • Cadastro no guichê
                     </p>
                   </div>
                 </div>
@@ -516,12 +685,13 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
               {/* BUTTON 2: EMERGÊNCIA (PRIORIDADE MÁXIMA) */}
               <button
                 type="button"
+                disabled={loading}
                 onClick={() => setModo('emergencia')}
-                className="w-full py-5 sm:py-6 px-6 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 active:scale-[0.98] text-white rounded-3xl shadow-[0_8px_30px_rgba(220,38,38,0.45)] border-3 border-red-300 transition-all flex items-center justify-between text-left group cursor-pointer animate-pulse"
+                className="w-full py-5 px-6 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 active:scale-[0.98] text-white rounded-3xl shadow-[0_8px_30px_rgba(220,38,38,0.45)] border-3 border-red-300 transition-all flex items-center justify-between text-left group cursor-pointer animate-pulse"
               >
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-white/20 text-white flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform shadow-xs border border-white/30">
-                    <HeartPulse className="w-8 h-8 text-white" />
+                  <div className="w-13 h-13 rounded-2xl bg-white/20 text-white flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform shadow-xs border border-white/30">
+                    <HeartPulse className="w-7 h-7 text-white" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
@@ -545,12 +715,13 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
               {/* BUTTON 3: AGENDAR RETORNO */}
               <button
                 type="button"
+                disabled={loading}
                 onClick={() => setModo('retorno')}
-                className="w-full py-5 sm:py-6 px-6 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 active:scale-[0.98] text-amber-950 rounded-3xl shadow-xl border-3 border-amber-200 transition-all flex items-center justify-between text-left group cursor-pointer"
+                className="w-full py-5 px-6 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 active:scale-[0.98] text-amber-950 rounded-3xl shadow-xl border-3 border-amber-200 transition-all flex items-center justify-between text-left group cursor-pointer"
               >
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-amber-500/30 text-amber-950 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs border border-amber-500/30">
-                    <Clock className="w-8 h-8 text-amber-950" />
+                  <div className="w-13 h-13 rounded-2xl bg-amber-500/30 text-amber-950 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs border border-amber-500/30">
+                    <Clock className="w-7 h-7 text-amber-950" />
                   </div>
                   <div>
                     <h2 className="text-xl sm:text-2xl font-black text-amber-950 tracking-tight leading-tight">
@@ -569,58 +740,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
           </div>
         )}
 
-        {/* ==================== 2. BALCAO MODE ==================== */}
-        {modo === 'balcao' && (
-          <div className="bg-white text-slate-900 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h2 className="text-2xl font-black text-emerald-950">Consulta sem Agendamento</h2>
-                <p className="text-xs text-slate-500">Retirada de senha para atendimento no guichê</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleVoltar}
-                className="text-slate-400 hover:text-slate-700 p-2 rounded-xl"
-              >
-                <ArrowLeft className="w-6 h-6" />
-              </button>
-            </div>
-
-            <form onSubmit={handleBalcaoConfirm} className="space-y-5">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                  Número da Ficha Física (se souber)
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: 48213 (ou deixe em branco se for paciente novo)"
-                  value={fichaBalcao}
-                  onChange={(e) => setFichaBalcao(e.target.value)}
-                  className="w-full px-4 py-3.5 border-2 border-slate-200 rounded-2xl text-lg font-bold text-slate-900 focus:outline-emerald-600 focus:border-emerald-600"
-                />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={handleVoltar}
-                  className="flex-1 py-3.5 px-4 border-2 border-slate-200 hover:bg-slate-50 text-slate-700 rounded-2xl font-bold text-sm"
-                >
-                  Voltar
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex-1 py-3.5 px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-2xl font-black text-sm shadow-md"
-                >
-                  {loading ? 'Emitindo...' : 'Emitir Senha de Atendimento'}
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {/* ==================== 3. EMERGENCY CONFIRMATION MODAL ==================== */}
+        {/* ==================== 2. EMERGENCY CONFIRMATION MODAL ==================== */}
         {modo === 'emergencia' && (
           <div className="bg-white text-slate-900 rounded-3xl p-6 sm:p-8 shadow-2xl border-4 border-red-500 space-y-6 text-center animate-in zoom-in-95 duration-200">
             <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-2 animate-bounce">
@@ -631,7 +751,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
               <h2 className="text-2xl sm:text-3xl font-black text-red-600">
                 Atenção: Atendimento de Emergência
               </h2>
-              <p className="text-slate-600 text-sm sm:text-base leading-relaxed max-w-md mx-auto mt-2">
+              <p className="text-slate-600 text-sm sm:text-base leading-relaxed max-w-md mx-auto mt-2 font-medium">
                 Utilize esta opção <b>exclusivamente</b> para animais em risco iminente de morte,
                 politraumatizados, hemorragias graves, convulsões ativas ou dificuldade respiratória severa.
               </p>
@@ -641,7 +761,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
               <button
                 type="button"
                 onClick={handleVoltar}
-                className="flex-1 py-4 px-4 border-2 border-slate-300 hover:bg-slate-100 text-slate-700 rounded-2xl font-black text-sm"
+                className="flex-1 py-4 px-4 border-2 border-slate-300 hover:bg-slate-100 text-slate-700 rounded-2xl font-black text-sm cursor-pointer"
               >
                 Não é emergência (Voltar)
               </button>
@@ -649,7 +769,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
                 type="button"
                 onClick={handleEmergenciaConfirm}
                 disabled={loading}
-                className="flex-1 py-4 px-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-black text-sm shadow-xl"
+                className="flex-1 py-4 px-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-black text-sm shadow-xl cursor-pointer"
               >
                 {loading ? 'Chamando equipe médica...' : 'CONFIRMAR EMERGÊNCIA'}
               </button>
@@ -657,20 +777,20 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
           </div>
         )}
 
-        {/* ==================== 4. RETORNO KEYPAD MODE ==================== */}
+        {/* ==================== 3. RETORNO KEYPAD MODE ==================== */}
         {modo === 'retorno' && (
           <div className="bg-white text-slate-900 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h2 className="text-2xl font-black text-emerald-950">Agendar Retorno</h2>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 font-semibold">
                   Informe a senha da sua consulta anterior realizada hoje
                 </p>
               </div>
               <button
                 type="button"
                 onClick={handleVoltar}
-                className="text-slate-400 hover:text-slate-700 p-2 rounded-xl"
+                className="text-slate-400 hover:text-slate-700 p-2 rounded-xl cursor-pointer"
               >
                 <ArrowLeft className="w-6 h-6" />
               </button>
@@ -678,12 +798,12 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
 
             {/* Prefix selector */}
             <div className="flex justify-center gap-2">
-              {(['C', 'R', 'L', 'X', 'U'] as const).map((letra) => (
+              {(['C', 'R', 'L', 'X', 'U', 'O'] as const).map((letra) => (
                 <button
                   key={letra}
                   type="button"
                   onClick={() => setLetraRetorno(letra)}
-                  className={`w-12 h-12 rounded-xl font-black text-lg border-2 transition-all ${
+                  className={`w-11 h-11 rounded-xl font-black text-lg border-2 transition-all cursor-pointer ${
                     letraRetorno === letra
                       ? 'bg-emerald-700 text-white border-emerald-700 shadow-md scale-105'
                       : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
@@ -710,7 +830,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
                   onClick={() => {
                     if (numeroRetorno.length < 3) setNumeroRetorno(numeroRetorno + n);
                   }}
-                  className="h-14 bg-slate-100 hover:bg-slate-200 active:bg-emerald-100 rounded-xl font-black text-xl text-slate-800 transition-colors"
+                  className="h-13 bg-slate-100 hover:bg-slate-200 active:bg-emerald-100 rounded-xl font-black text-xl text-slate-800 transition-colors cursor-pointer"
                 >
                   {n}
                 </button>
@@ -718,7 +838,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
               <button
                 type="button"
                 onClick={() => setNumeroRetorno('')}
-                className="h-14 bg-slate-100 hover:bg-red-50 text-red-600 rounded-xl font-bold text-xs"
+                className="h-13 bg-slate-100 hover:bg-red-50 text-red-600 rounded-xl font-bold text-xs cursor-pointer"
               >
                 Limpar
               </button>
@@ -727,14 +847,14 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
                 onClick={() => {
                   if (numeroRetorno.length < 3) setNumeroRetorno(numeroRetorno + '0');
                 }}
-                className="h-14 bg-slate-100 hover:bg-slate-200 active:bg-emerald-100 rounded-xl font-black text-xl text-slate-800 transition-colors"
+                className="h-13 bg-slate-100 hover:bg-slate-200 active:bg-emerald-100 rounded-xl font-black text-xl text-slate-800 transition-colors cursor-pointer"
               >
                 0
               </button>
               <button
                 type="button"
                 onClick={() => setNumeroRetorno(numeroRetorno.slice(0, -1))}
-                className="h-14 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center text-slate-600"
+                className="h-13 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center text-slate-600 cursor-pointer"
               >
                 <Delete className="w-5 h-5" />
               </button>
@@ -744,7 +864,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
               <button
                 type="button"
                 onClick={handleVoltar}
-                className="flex-1 py-3 px-4 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl font-bold text-sm"
+                className="flex-1 py-3.5 px-4 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl font-bold text-sm cursor-pointer"
               >
                 Voltar
               </button>
@@ -752,7 +872,7 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
                 type="button"
                 onClick={handleRetornoConfirm}
                 disabled={loading || !numeroRetorno}
-                className="flex-1 py-3 px-4 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl font-black text-sm shadow-md"
+                className="flex-1 py-3.5 px-4 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl font-black text-sm shadow-md cursor-pointer"
               >
                 {loading ? 'Localizando...' : 'Entrar na Fila de Retorno'}
               </button>
@@ -760,20 +880,20 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
           </div>
         )}
 
-        {/* ==================== 5. MANUAL TOKEN INPUT MODAL ==================== */}
+        {/* ==================== 4. MANUAL TOKEN INPUT MODAL ==================== */}
         {modo === 'manual_token' && (
           <div className="bg-white text-slate-900 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h2 className="text-2xl font-black text-emerald-950">Digitar Código do QR</h2>
-                <p className="text-xs text-slate-500">
-                  Informe o código alfanumérico enviado para o seu WhatsApp
+                <p className="text-xs text-slate-500 font-semibold">
+                  Informe o código ou número da ficha do agendamento
                 </p>
               </div>
               <button
                 type="button"
                 onClick={handleVoltar}
-                className="text-slate-400 hover:text-slate-700 p-2 rounded-xl"
+                className="text-slate-400 hover:text-slate-700 p-2 rounded-xl cursor-pointer"
               >
                 <ArrowLeft className="w-6 h-6" />
               </button>
@@ -782,11 +902,11 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
             <form onSubmit={handleManualTokenSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                  Código de Check-in
+                  Código de Check-in ou Ficha
                 </label>
                 <input
                   type="text"
-                  placeholder="Ex: 20261105abc123"
+                  placeholder="Ex: 20261105abc123 ou 48213"
                   value={manualTokenInput}
                   onChange={(e) => setManualTokenInput(e.target.value)}
                   className="w-full px-4 py-3.5 border-2 border-slate-200 rounded-2xl text-lg font-mono font-bold text-slate-900 focus:outline-emerald-600 focus:border-emerald-600"
@@ -797,14 +917,14 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
                 <button
                   type="button"
                   onClick={handleVoltar}
-                  className="flex-1 py-3.5 px-4 border-2 border-slate-200 hover:bg-slate-50 text-slate-700 rounded-2xl font-bold text-sm"
+                  className="flex-1 py-3.5 px-4 border-2 border-slate-200 hover:bg-slate-50 text-slate-700 rounded-2xl font-bold text-sm cursor-pointer"
                 >
                   Voltar
                 </button>
                 <button
                   type="submit"
                   disabled={loading || !manualTokenInput.trim()}
-                  className="flex-1 py-3.5 px-4 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-2xl font-black text-sm shadow-md"
+                  className="flex-1 py-3.5 px-4 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-2xl font-black text-sm shadow-md cursor-pointer"
                 >
                   {loading ? 'Validando...' : 'Confirmar Check-in'}
                 </button>
@@ -813,9 +933,9 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
           </div>
         )}
 
-        {/* ==================== 6. SUCCESS SCREEN ==================== */}
+        {/* ==================== 5. SUCCESS SCREEN WITH AUTO-RESET & PRINT ==================== */}
         {modo === 'sucesso' && resultado && (
-          <div className="bg-white text-slate-900 rounded-3xl p-8 sm:p-12 shadow-2xl text-center space-y-6 border-4 border-emerald-400 animate-in zoom-in-95 duration-200">
+          <div className="bg-white text-slate-900 rounded-3xl p-6 sm:p-10 shadow-2xl text-center space-y-5 border-4 border-emerald-400 animate-in zoom-in-95 duration-200">
             <div className="inline-flex items-center justify-center p-3 bg-emerald-100 text-emerald-800 rounded-full">
               <CheckCircle2 className="w-12 h-12" />
             </div>
@@ -824,14 +944,15 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
               <p className="text-xs uppercase tracking-widest font-extrabold text-slate-400">
                 Sua Senha de Atendimento
               </p>
-              <div className="text-6xl sm:text-8xl font-black text-emerald-800 tracking-wider my-3 font-mono">
+              <div className="text-6xl sm:text-8xl font-black text-emerald-800 tracking-wider my-2 font-mono">
                 {resultado.senha}
               </div>
-              <div className="text-base sm:text-lg font-bold text-slate-700">{resultado.tipo}</div>
-              <p className="text-xs text-slate-500 mt-1">{resultado.msg}</p>
+              <div className="text-lg font-black text-slate-800">{resultado.tipo}</div>
+              <p className="text-xs text-slate-500 mt-0.5 font-medium">{resultado.msg}</p>
             </div>
 
-            <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-200 max-w-sm mx-auto">
+            {/* Position in queue pill */}
+            <div className="bg-emerald-50 rounded-2xl p-3 border border-emerald-200 max-w-sm mx-auto">
               <div className="text-xs text-emerald-900 font-semibold">
                 {resultado.frente > 0 ? (
                   <>
@@ -842,25 +963,45 @@ export const CheckinView: React.FC<CheckinViewProps> = ({
                   <>Você é o próximo a ser chamado no guichê!</>
                 )}
               </div>
-              <div className="text-[11px] text-emerald-700 mt-1">
-                Acompanhe as chamadas de voz e tela pelo Painel TV na recepção.
+              <div className="text-[11px] text-emerald-700 mt-0.5">
+                Acompanhe a chamada no Painel TV da recepção.
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleVoltar}
-              className="py-3 px-8 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-black text-sm shadow-md transition-all cursor-pointer"
-            >
-              Concluir ({countdown}s)
-            </button>
+            {/* Action buttons on success */}
+            <div className="flex flex-col sm:flex-row gap-2 justify-center max-w-sm mx-auto pt-1">
+              <button
+                type="button"
+                onClick={() => imprimirSenhaTermica(resultado)}
+                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-300 transition-colors cursor-pointer"
+              >
+                <Printer className="w-4 h-4 text-slate-600" />
+                <span>Imprimir Senha</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleVoltar}
+                className="py-2.5 px-6 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>Novo Atendimento ({countdown}s)</span>
+              </button>
+            </div>
+
+            {/* Auto-reset progress indicator */}
+            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-emerald-600 h-1.5 transition-all duration-1000 ease-linear"
+                style={{ width: `${(countdown / 4) * 100}%` }}
+              />
+            </div>
           </div>
         )}
       </div>
 
       {/* Bottom Footer Notice */}
-      <div className="max-w-2xl mx-auto w-full text-center text-xs text-emerald-100 font-semibold pb-1">
-        Em caso de dúvidas ou dificuldades com a leitura, dirija-se diretamente a um dos nossos guichês.
+      <div className="max-w-xl mx-auto w-full text-center text-xs text-emerald-100 font-semibold pb-1">
+        Em caso de dúvidas ou dificuldades, dirija-se diretamente a um dos nossos guichês.
       </div>
     </div>
   );

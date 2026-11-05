@@ -370,23 +370,54 @@ export const GuicheView: React.FC<GuicheViewProps> = ({
           {(guicheAtual.estado === 'chamando' || guicheAtual.estado === 'atendendo') && apptAtual && (
             <div className="space-y-6">
               {/* Giant Ticket Banner */}
-              <div className="bg-gradient-to-r from-emerald-900 to-teal-800 rounded-3xl p-6 sm:p-8 text-white text-center shadow-lg relative overflow-hidden">
-                <div className="text-xs uppercase tracking-widest text-emerald-200 font-bold mb-1">
+              <div className="bg-gradient-to-r from-emerald-900 to-teal-800 rounded-3xl p-6 sm:p-8 text-white text-center shadow-lg relative overflow-hidden space-y-3">
+                <div className="text-xs uppercase tracking-widest text-emerald-200 font-bold">
                   {guicheAtual.estado === 'chamando' ? 'Chamando no Painel TV' : 'Em Atendimento'}
                 </div>
-                <div className="text-6xl sm:text-8xl font-black tracking-wider font-mono my-2">
+                <div className="text-6xl sm:text-8xl font-black tracking-wider font-mono my-1">
                   {apptAtual.senha || '—'}
                 </div>
-                <div className="text-lg sm:text-xl font-bold text-emerald-100">
-                  {TIPOS[apptAtual.tipo].label} • Ficha {apptAtual.ficha}
+                <div className="text-lg sm:text-xl font-black text-emerald-100">
+                  {TIPOS[apptAtual.tipo]?.label || apptAtual.tipo}
                 </div>
-                {apptAtual.pet && (
-                  <div className="text-sm font-semibold text-emerald-200 mt-1">
-                    Pet: {apptAtual.pet} {apptAtual.tutor ? `(${apptAtual.tutor})` : ''}
+
+                {/* USER REQUIREMENT: Ficha, Tutor, Paciente, Veterinário, Horário Agendado */}
+                <div className="bg-black/25 backdrop-blur-md rounded-2xl p-3.5 border border-white/15 text-left grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-emerald-300 font-semibold block text-[11px] uppercase tracking-wider">Número da Ficha</span>
+                    <span className="font-black text-white text-sm tracking-wide">{apptAtual.ficha || 'S/N'}</span>
+                  </div>
+                  <div>
+                    <span className="text-emerald-300 font-semibold block text-[11px] uppercase tracking-wider">Horário Agendado</span>
+                    <span className="font-bold text-white text-sm">
+                      {apptAtual.horario ? `⏰ ${apptAtual.horario}` : 'Sem horário pré-fixado'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-emerald-300 font-semibold block text-[11px] uppercase tracking-wider">Nome do Paciente (Pet)</span>
+                    <span className="font-bold text-white text-sm">{apptAtual.pet || 'Não informado'}</span>
+                  </div>
+                  <div>
+                    <span className="text-emerald-300 font-semibold block text-[11px] uppercase tracking-wider">Nome do Tutor</span>
+                    <span className="font-bold text-white text-sm">{apptAtual.tutor || 'Não informado'}</span>
+                  </div>
+                  <div className="sm:col-span-2 pt-1 border-t border-white/10 flex items-center justify-between">
+                    <div>
+                      <span className="text-emerald-300 font-semibold text-[11px] uppercase tracking-wider">Veterinário Responsável: </span>
+                      <span className="font-black text-emerald-100">{apptAtual.clinico || 'A definir'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Notice for walk-in appointment without prior registration */}
+                {(apptAtual.ficha.includes('cadastro') || !apptAtual.tutor || apptAtual.tutor.includes('cadastro')) && (
+                  <div className="bg-amber-400 text-amber-950 px-3.5 py-1.5 rounded-xl font-black text-xs shadow-xs text-center animate-pulse">
+                    ⚠️ Consulta sem agendamento: Coletar os dados do tutor e cadastrar a ficha física abaixo.
                   </div>
                 )}
+
                 {apptAtual.retornoPara && (
-                  <div className="mt-2 inline-block bg-amber-400 text-amber-950 font-black text-xs px-3 py-1 rounded-full">
+                  <div className="inline-block bg-amber-400 text-amber-950 font-black text-xs px-3.5 py-1 rounded-full shadow-xs">
                     Retorno indicado pelo médico para {brData(apptAtual.retornoPara)}
                   </div>
                 )}
@@ -540,38 +571,38 @@ export const GuicheView: React.FC<GuicheViewProps> = ({
 
         {/* Right Column: Quick Balcao + Queue Preview */}
         <div className="lg:col-span-4 space-y-6">
-          {/* Quick manual Balcão Checkin */}
+          {/* USER REQUIREMENT: Nomenclatura alterada para "Nova Senha" e botão "Emitir Senha" */}
           <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
-            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+            <h3 className="font-black text-sm text-slate-900 flex items-center gap-2">
               <PlusCircle className="w-4 h-4 text-emerald-700" />
-              Check-in Rápido de Balcão
+              Nova Senha
             </h3>
-            <p className="text-xs text-slate-500">
-              Emita uma senha imediata para quem chegou diretamente ao guichê.
+            <p className="text-xs text-slate-500 font-medium">
+              Emita uma senha avulsa para atendimento presencial no guichê.
             </p>
 
             <form onSubmit={handleQuickBalcao} className="space-y-3">
               <input
                 type="text"
-                placeholder="Número da Ficha (Ex: 48991)"
+                placeholder="Número da Ficha (opcional)"
                 value={balcaoFicha}
                 onChange={(e) => setBalcaoFicha(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-800"
               />
 
               <div className="grid grid-cols-2 gap-1.5">
-                {(['consulta', 'retorno', 'exames', 'emergencia'] as TipoAtendimento[]).map((t) => (
+                {(['consulta', 'retorno', 'exames', 'emergencia', 'outros'] as TipoAtendimento[]).map((t) => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => setBalcaoTipo(t)}
-                    className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition-colors ${
+                    className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${
                       balcaoTipo === t
                         ? 'bg-emerald-700 border-emerald-700 text-white shadow-xs'
-                        : 'bg-slate-50 border-slate-200 text-slate-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                     }`}
                   >
-                    {TIPOS[t].label}
+                    {TIPOS[t]?.label || t}
                   </button>
                 ))}
               </div>
@@ -579,7 +610,7 @@ export const GuicheView: React.FC<GuicheViewProps> = ({
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl"
+                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black rounded-xl cursor-pointer shadow-xs"
               >
                 Emitir Senha
               </button>

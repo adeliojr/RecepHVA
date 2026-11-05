@@ -1,4 +1,11 @@
-export type TipoAtendimento = 'consulta' | 'retorno' | 'exames' | 'radiografia' | 'ultrassom' | 'emergencia';
+export type TipoAtendimento =
+  | 'consulta'
+  | 'retorno'
+  | 'exames'
+  | 'radiografia'
+  | 'ultrassom'
+  | 'emergencia'
+  | 'outros';
 
 export type StatusAtendimento =
   | 'agendado'
@@ -25,6 +32,7 @@ export const TIPOS: Record<TipoAtendimento, TipoInfo> = {
   radiografia: { label: 'Radiografia', p: 'X', prio: 1 },
   ultrassom: { label: 'Ultrassom', p: 'U', prio: 1 },
   emergencia: { label: 'Emergência', p: 'E', prio: 0 },
+  outros: { label: 'Outros', p: 'O', prio: 1 },
 };
 
 export const FORM_TIPOS: TipoAtendimento[] = [
@@ -33,6 +41,7 @@ export const FORM_TIPOS: TipoAtendimento[] = [
   'exames',
   'radiografia',
   'ultrassom',
+  'outros',
 ];
 
 export const STATUS_LABELS: Record<StatusAtendimento, string> = {
@@ -61,6 +70,7 @@ export interface Appointment {
   id: string;
   token: string;
   data: string; // YYYY-MM-DD
+  horario?: string; // HH:mm
   ficha: string;
   tipo: TipoAtendimento;
   clinico: string;

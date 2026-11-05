@@ -63,9 +63,27 @@ export const defaultDaySummary = (date: string): DaySummary => ({
   chamadas: [],
 });
 
+export const LISTA_VETERINARIOS_HVA: string[] = [
+  'Adélio Gurgel do Amaral Junior',
+  'Giovani Fernando Araujo',
+  'Kalinca Gromboni',
+  'Laiandra Orefice Negrão',
+  'Lais M. de Campos',
+  'Leonardo Gonçalves de Oliveira',
+  'Lorena Ortega Silvestre',
+  'Luana Campos de Pieri',
+  'Luis Antonio Villas Boas',
+  'Marco Cesar Toni Moraes',
+  'Rafael Corradi Castilho',
+  'Renata F. P. Prezotto',
+  'Taine Elia de Oliveira',
+  'Tamara Adorna',
+  'Vinícius Camargo Fração',
+];
+
 export const defaultSettings: HospitalSettings = {
   nomeHospital: 'HVA – Hospital Veterinário Araújo',
-  clinicos: ['Dr. Adélio', 'Dra. Maria', 'Dr. Carlos'],
+  clinicos: LISTA_VETERINARIOS_HVA,
 };
 
 // ==================== SUBSCRIPTIONS ====================
@@ -78,7 +96,19 @@ export function subscribeSettings(
     docRef,
     (snapshot) => {
       if (snapshot.exists()) {
-        callback(snapshot.data() as HospitalSettings);
+        const data = snapshot.data() as HospitalSettings;
+        // Merge registered clinicians with full HVA team list so all 15 are always available
+        const currentList = Array.isArray(data.clinicos) ? data.clinicos : [];
+        const mergedClinicos = Array.from(new Set([...LISTA_VETERINARIOS_HVA, ...currentList]));
+        
+        // If Firestore had only previous test clinicians, update it with complete team
+        if (currentList.length < LISTA_VETERINARIOS_HVA.length) {
+          updateDoc(docRef, { clinicos: mergedClinicos }).catch(() => {});
+        }
+        callback({
+          ...data,
+          clinicos: mergedClinicos,
+        });
       } else {
         // Initialize default settings if not exists
         setDoc(docRef, defaultSettings).catch((err) =>
@@ -183,6 +213,7 @@ export async function agendarAtendimento(params: {
   clinico: string;
   tipo: TipoAtendimento;
   data: string;
+  horario?: string;
   pet?: string;
   tutor?: string;
 }): Promise<{ appt: Appointment; isNovo: boolean }> {
@@ -199,6 +230,7 @@ export async function agendarAtendimento(params: {
     tipo: params.tipo,
     clinico: params.clinico,
     data: params.data,
+    horario: params.horario || '',
     pet: params.pet || '',
     tutor: params.tutor || '',
     status: 'agendado',
@@ -222,43 +254,109 @@ export async function checkinComQr(
   appts: Appointment[],
   ignorarData = false
 ): Promise<{ appt: Appointment; jaFeito: boolean; frente: number }> {
-  const token = (rawToken || '')
-    .trim()
-    .replace(/^.*[#?&]token=/, '')
-    .split(/[#?&\s]/)[0];
+  const trimmed = (rawToken || '').trim();
 
-  const a = appts.find(
-    (x) =>
-      x.token === token ||
-      x.token.toLowerCase() === token.toLowerCase() ||
-      x.id === token
-  );
-  if (!a) {
-    const match = /^(\d{4})(\d{2})(\d{2})/.exec(token || '');
-    if (match && `${match[1]}-${match[2]}-${match[3]}` !== hoje() && !ignorarData) {
-      throw new Error(`Este QR code é para o dia ${match[3]}/${match[2]}. Procure a recepção.`);
+  // Try parsing structured JSON if encoded in QR
+  let qrJson: any = null;
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('%7B') && trimmed.endsWith('%7D'))) {
+    try {
+      const decodedStr = trimmed.startsWith('%7B') ? decodeURIComponent(trimmed) : trimmed;
+      qrJson = JSON.parse(decodedStr);
+    } catch (e) {
+      console.warn('QR JSON parse fallback:', e);
     }
-    throw new Error(`QR code (${token.slice(0, 12)}...) não reconhecido. Procure a recepção.`);
+  }
+
+  const token = qrJson?.token ||
+    trimmed
+      .replace(/^.*[#?&]token=/, '')
+      .split(/[#?&\s]/)[0];
+
+  // Search in existing appointments
+  let a = appts.find(
+    (x) =>
+      (token && (x.token === token || x.token.toLowerCase() === token.toLowerCase() || x.id === token)) ||
+      (qrJson?.id && x.id === qrJson.id) ||
+      (qrJson?.ficha && x.ficha === qrJson.ficha && (x.data === hoje() || x.status === 'agendado'))
+  );
+
+  // If not found in list but QR contains full appointment JSON, create/restore it on the fly
+  if (!a && qrJson) {
+    const id = qrJson.id || rid(10);
+    a = {
+      id,
+      token: qrJson.token || token || novoToken(hoje()),
+      ficha: qrJson.ficha || 'S/ficha',
+      tipo: qrJson.tipo || 'consulta',
+      clinico: qrJson.clinico || '',
+      data: hoje(),
+      horario: qrJson.horario || '',
+      pet: qrJson.pet || '',
+      tutor: qrJson.tutor || '',
+      status: 'agendado',
+      senha: null,
+      guiche: null,
+      origem: 'agenda',
+      pulos: 0,
+    };
+    try {
+      await setDoc(doc(db, 'appointments', id), a);
+    } catch {}
+  }
+
+  // If still not found by exact token, search by record number if digits were scanned
+  if (!a && /^\d{3,7}$/.test(token)) {
+    a = appts.find((x) => x.ficha === token && x.status === 'agendado');
+  }
+
+  // If still not recognized, do not leave tutor stranded: generate a valid consultation ticket
+  if (!a) {
+    const fallbackId = rid(10);
+    const tipoPadrao: TipoAtendimento = 'consulta';
+    const { senha, cont } = proximaSenha(daySummary, tipoPadrao);
+    const now = Date.now();
+    const fallbackAppt: Appointment = {
+      id: fallbackId,
+      token: token || novoToken(hoje()),
+      ficha: token.length <= 10 ? token : 'Aguardando cadastro',
+      tipo: tipoPadrao,
+      clinico: '',
+      data: hoje(),
+      pet: '',
+      tutor: 'Tutor c/ QR gerado',
+      status: 'aguardando',
+      senha,
+      origem: 'agenda',
+      pulos: 0,
+      checkinAt: now,
+      filaDesde: now,
+    };
+
+    try {
+      await setDoc(doc(db, 'appointments', fallbackId), fallbackAppt);
+      await updateDoc(doc(db, 'days', hoje()), { cont });
+      const fila = getFilaEspera(appts);
+      return { appt: fallbackAppt, jaFeito: false, frente: fila.length };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `appointments/${fallbackId}`);
+    }
   }
 
   if (a.status === 'cancelado') {
-    throw new Error('Este atendimento foi cancelado. Procure a recepção.');
+    throw new Error('Este atendimento consta como cancelado no sistema. Procure a recepção.');
   }
 
   const fila = getFilaEspera(appts);
 
+  // If already checked in and waiting or in progress, return current ticket
   if (a.status !== 'agendado') {
     if (['aguardando', 'chamado', 'atendimento_recepcao', 'encaminhado', 'em_consulta', 'retorno_aguardando'].includes(a.status)) {
       const idx = fila.findIndex((x) => x.id === a.id);
       return { appt: a, jaFeito: true, frente: idx >= 0 ? idx : 0 };
     }
-    throw new Error('Este QR code já foi utilizado. Para agendar retorno, toque em "Agendar retorno".');
   }
 
-  if (a.data !== hoje() && !ignorarData) {
-    throw new Error(`Este QR code é para o dia ${brData(a.data)}. Procure a recepção.`);
-  }
-
+  // USER REQUIREMENT: Even if arrived on the wrong day or wrong time, issue the ticket for today!
   const now = Date.now();
   const { senha, cont } = proximaSenha(daySummary, a.tipo);
 
@@ -268,7 +366,7 @@ export async function checkinComQr(
     senha,
     checkinAt: now,
     filaDesde: now,
-    data: hoje(),
+    data: hoje(), // Move/register to today's queue
   };
 
   try {
@@ -286,15 +384,11 @@ export async function checkinManualBalcao(
   daySummary: DaySummary,
   appts: Appointment[]
 ): Promise<{ appt: Appointment; jaFeito: boolean; frente: number }> {
-  const f = ficha.trim().replace(/\s+/g, '');
-  if (!f && tipo !== 'emergencia') {
-    throw new Error('Informe o número da ficha');
-  }
-
+  const f = (ficha || '').trim().replace(/\s+/g, '');
   const fila = getFilaEspera(appts);
   const now = Date.now();
 
-  // If already scheduled for today
+  // If ficha was provided and already scheduled for today
   if (f) {
     const agendado = appts.find(
       (a) => a.ficha === f && a.data === hoje() && a.status === 'agendado' && a.tipo === tipo
@@ -316,15 +410,21 @@ export async function checkinManualBalcao(
 
   const id = rid(10);
   const { senha, cont } = proximaSenha(daySummary, tipo);
+
+  // USER REQUIREMENT: When clicking "Consulta sem agendamento", tutor doesn't know ficha number.
+  // Generate ticket immediately with clear label for counter secretary to collect data.
+  const displayFicha = f || (tipo === 'emergencia' ? 'EMERG' : 'Consulta s/ agendamento (Fazer cadastro)');
+  const displayTutor = f ? '' : (tipo === 'emergencia' ? 'EMERGÊNCIA' : 'Coletar dados na chamada');
+
   const novo: Appointment = {
     id,
     token: novoToken(hoje()),
-    ficha: f || (tipo === 'emergencia' ? 'EMERG' : 'S/ficha'),
+    ficha: displayFicha,
     tipo,
     clinico: '',
     data: hoje(),
     pet: '',
-    tutor: '',
+    tutor: displayTutor,
     status: 'aguardando',
     senha,
     origem: 'balcao',
