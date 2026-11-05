@@ -1,0 +1,6 @@
+{
+  "name": "Recepção HVA",
+  "description": "Sistema de gestão de recepção, senhas por QR Code, guichês, painel TV e consultório clínico para o Hospital Veterinário Araújo.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

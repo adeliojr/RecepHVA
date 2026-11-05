@@ -1,0 +1,183 @@
+{
+  "entities": {
+    "HospitalSettings": {
+      "title": "HospitalSettings",
+      "description": "General settings for the hospital reception",
+      "type": "object",
+      "properties": {
+        "nomeHospital": {
+          "type": "string",
+          "description": "Hospital name",
+          "maxLength": 100
+        },
+        "clinicos": {
+          "type": "array",
+          "description": "List of active veterinary clinicians"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last settings update timestamp"
+        }
+      },
+      "required": ["nomeHospital", "clinicos"]
+    },
+    "DaySummary": {
+      "title": "DaySummary",
+      "description": "Daily queue, counter and display panel operational state",
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "ISO date YYYY-MM-DD",
+          "maxLength": 10
+        },
+        "seq": {
+          "type": "number",
+          "description": "Monotonic calling sequence counter for TV display sound/flash"
+        },
+        "cont": {
+          "type": "object",
+          "description": "Counter map for prefixes (C, R, L, X, U, E)"
+        },
+        "guiches": {
+          "type": "array",
+          "description": "State of all counters (guichês 1 to 4)"
+        },
+        "chamadas": {
+          "type": "array",
+          "description": "Recent 12 ticket calls for the TV panel"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last change timestamp"
+        }
+      },
+      "required": ["date", "seq", "guiches", "chamadas"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Patient ticket, scheduling and clinical care lifecycle record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique record identifier",
+          "maxLength": 64
+        },
+        "token": {
+          "type": "string",
+          "description": "QR code token value",
+          "maxLength": 64
+        },
+        "data": {
+          "type": "string",
+          "description": "Scheduled date YYYY-MM-DD",
+          "maxLength": 10
+        },
+        "ficha": {
+          "type": "string",
+          "description": "Medical record number or EMERG / S/ficha",
+          "maxLength": 32
+        },
+        "tipo": {
+          "type": "string",
+          "description": "Type of service",
+          "enum": ["consulta", "retorno", "exames", "radiografia", "ultrassom", "emergencia"]
+        },
+        "clinico": {
+          "type": "string",
+          "description": "Assigned veterinarian name",
+          "maxLength": 100
+        },
+        "pet": {
+          "type": "string",
+          "description": "Pet patient name",
+          "maxLength": 100
+        },
+        "tutor": {
+          "type": "string",
+          "description": "Pet owner name",
+          "maxLength": 100
+        },
+        "status": {
+          "type": "string",
+          "description": "Current lifecycle status",
+          "enum": ["agendado", "aguardando", "retorno_aguardando", "chamado", "atendimento_recepcao", "encaminhado", "em_consulta", "finalizado", "nao_compareceu", "cancelado"]
+        },
+        "senha": {
+          "type": "string",
+          "description": "Ticket code, e.g. C001, E001",
+          "maxLength": 10
+        },
+        "guiche": {
+          "type": "number",
+          "description": "Counter number currently attending or calling"
+        },
+        "origem": {
+          "type": "string",
+          "description": "Origin of ticket (agenda, balcao, retorno)",
+          "maxLength": 20
+        },
+        "pulos": {
+          "type": "number",
+          "description": "Number of times skipped in queue"
+        },
+        "filaDesde": {
+          "type": "number",
+          "description": "Timestamp in milliseconds when entered current waiting queue"
+        },
+        "checkinAt": {
+          "type": "number",
+          "description": "Timestamp when check-in occurred"
+        },
+        "encaminhadoEm": {
+          "type": "number",
+          "description": "Timestamp when forwarded to doctor"
+        },
+        "consultaEm": {
+          "type": "number",
+          "description": "Timestamp when consultation started"
+        },
+        "finalizadoEm": {
+          "type": "number",
+          "description": "Timestamp when finished"
+        },
+        "retornoSolicitado": {
+          "type": "boolean",
+          "description": "Flag if patient is in line to schedule return"
+        },
+        "retornoPara": {
+          "type": "string",
+          "description": "Target date for scheduled return",
+          "maxLength": 10
+        },
+        "retornoObs": {
+          "type": "string",
+          "description": "Notes for return consultation",
+          "maxLength": 500
+        },
+        "retornoSem": {
+          "type": "boolean",
+          "description": "Indicates doctor specified no return needed"
+        }
+      },
+      "required": ["id", "token", "data", "ficha", "tipo", "status"]
+    }
+  },
+  "firestore": {
+    "/settings/hospital": {
+      "schema": "#/entities/HospitalSettings",
+      "description": "Hospital configuration including active veterinarians"
+    },
+    "/days/{date}": {
+      "schema": "#/entities/DaySummary",
+      "description": "Daily queue, counter states and TV calls"
+    },
+    "/appointments/{appointmentId}": {
+      "schema": "#/entities/Appointment",
+      "description": "Appointments and tickets across all days"
+    }
+  }
+}

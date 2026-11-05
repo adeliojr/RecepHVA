@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isValidId(docId);
+    }
+
+    match /days/{date} {
+      allow read: if true;
+      allow write: if isValidId(date);
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if true;
+      allow create: if isValidId(appointmentId) &&
+                       request.resource.data.id is string &&
+                       request.resource.data.token is string &&
+                       request.resource.data.data is string &&
+                       request.resource.data.ficha is string &&
+                       request.resource.data.tipo in ['consulta', 'retorno', 'exames', 'radiografia', 'ultrassom', 'emergencia'] &&
+                       request.resource.data.status in ['agendado', 'aguardando', 'retorno_aguardando', 'chamado', 'atendimento_recepcao', 'encaminhado', 'em_consulta', 'finalizado', 'nao_compareceu', 'cancelado'];
+
+      allow update: if isValidId(appointmentId) &&
+                       request.resource.data.status in ['agendado', 'aguardando', 'retorno_aguardando', 'chamado', 'atendimento_recepcao', 'encaminhado', 'em_consulta', 'finalizado', 'nao_compareceu', 'cancelado'];
+
+      allow delete: if isValidId(appointmentId);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
